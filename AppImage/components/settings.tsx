@@ -5,24 +5,12 @@ import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 import { Label } from "./ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
-import {
-  Shield,
-  Lock,
-  User,
-  AlertCircle,
-  CheckCircle,
-  Info,
-  LogOut,
-  Wrench,
-  Package,
-  Key,
-  Copy,
-  Eye,
-  EyeOff,
-} from "lucide-react"
+import { Shield, Lock, User, AlertCircle, CheckCircle, Info, LogOut, Wrench, Package, Key, Copy, Eye, EyeOff, Ruler } from 'lucide-react'
 import { APP_VERSION } from "./release-notes-modal"
 import { getApiUrl, fetchApi } from "../lib/api-config"
 import { TwoFactorSetup } from "./two-factor-setup"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
+import { getNetworkUnit } from "../lib/format-network"
 
 interface ProxMenuxTool {
   key: string
@@ -68,9 +56,13 @@ export function Settings() {
   const [generatingToken, setGeneratingToken] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
 
+  const [networkUnitSettings, setNetworkUnitSettings] = useState<"Bytes" | "Bits">("Bytes")
+  const [loadingUnitSettings, setLoadingUnitSettings] = useState(true)
+
   useEffect(() => {
     checkAuthStatus()
     loadProxmenuxTools()
+    getUnitsSettings() // Load units settings on mount
   }, [])
 
   const checkAuthStatus = async () => {
@@ -359,6 +351,28 @@ export function Settings() {
       ...prev,
       [version]: !prev[version],
     }))
+  }
+
+  const changeNetworkUnit = (unit: string) => {
+    const networkUnit = unit as "Bytes" | "Bits"
+    localStorage.setItem("proxmenux-network-unit", networkUnit)
+    setNetworkUnitSettings(networkUnit)
+    
+    // Dispatch custom event to notify other components
+    window.dispatchEvent(new CustomEvent("networkUnitChanged", { detail: networkUnit }))
+    
+    // Also dispatch storage event for backward compatibility
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "proxmenux-network-unit",
+      newValue: networkUnit,
+      url: window.location.href
+    }))
+  }
+
+  const getUnitsSettings = () => {
+    const networkUnit = getNetworkUnit()
+    setNetworkUnitSettings(networkUnit)
+    setLoadingUnitSettings(false)
   }
 
   return (
@@ -657,6 +671,37 @@ export function Settings() {
               <Button onClick={handleDisableAuth} variant="destructive" className="w-full" disabled={loading}>
                 Disable Authentication
               </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Network Units Settings */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Ruler className="h-5 w-5 text-green-500" />
+            <CardTitle>Network Units</CardTitle>
+          </div>
+          <CardDescription>Change how network traffic is displayed</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingUnitSettings ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin h-8 w-8 border-4 border-green-500 border-t-transparent rounded-full" />
+            </div>
+          ) : (
+            <div className="text-foreground flex items-center justify-between">
+              <div className="flex items-center">Network Unit Display</div>
+              <Select value={networkUnitSettings} onValueChange={changeNetworkUnit}>
+                <SelectTrigger className="w-28 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Bytes">Bytes</SelectItem>
+                  <SelectItem value="Bits">Bits</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           )}
         </CardContent>

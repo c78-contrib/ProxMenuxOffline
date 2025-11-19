@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react"
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
-import { Loader2 } from "lucide-react"
-import { fetchApi } from "@/lib/api-config"
+import { Loader2 } from 'lucide-react'
+import { fetchApi } from "../lib/api-config"
+import { getNetworkUnit } from "../lib/format-network"
 
 interface NetworkMetricsData {
   time: string
@@ -17,9 +18,10 @@ interface NetworkTrafficChartProps {
   interfaceName?: string
   onTotalsCalculated?: (totals: { received: number; sent: number }) => void
   refreshInterval?: number // En milisegundos, por defecto 60000 (60 segundos)
+  networkUnit?: "Bytes" | "Bits" // Added networkUnit prop
 }
 
-const CustomNetworkTooltip = ({ active, payload, label }: any) => {
+const CustomNetworkTooltip = ({ active, payload, label, networkUnit }: any) => {
   if (active && payload && payload.length) {
     return (
       <div className="bg-gray-900/95 backdrop-blur-sm border border-gray-700 rounded-lg p-3 shadow-xl">
@@ -29,7 +31,9 @@ const CustomNetworkTooltip = ({ active, payload, label }: any) => {
             <div key={index} className="flex items-center gap-2">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: entry.color }} />
               <span className="text-xs text-gray-300 min-w-[60px]">{entry.name}:</span>
-              <span className="text-sm font-semibold text-white">{entry.value.toFixed(3)} GB</span>
+              <span className="text-sm font-semibold text-white">
+                {entry.value.toFixed(3)} {networkUnit === "Bits" ? "Gb" : "GB"}
+              </span>
             </div>
           ))}
         </div>
@@ -44,6 +48,7 @@ export function NetworkTrafficChart({
   interfaceName,
   onTotalsCalculated,
   refreshInterval = 60000,
+  networkUnit: networkUnitProp, // Rename prop to avoid conflict
 }: NetworkTrafficChartProps) {
   const [data, setData] = useState<NetworkMetricsData[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,11 +58,36 @@ export function NetworkTrafficChart({
     netIn: true,
     netOut: true,
   })
+  
+  const [networkUnit, setNetworkUnit] = useState<"Bytes" | "Bits">(
+    networkUnitProp || getNetworkUnit()
+  )
+
+  useEffect(() => {
+    const handleUnitChange = () => {
+      const newUnit = getNetworkUnit()
+      setNetworkUnit(newUnit)
+    }
+
+    window.addEventListener("networkUnitChanged", handleUnitChange)
+    window.addEventListener("storage", handleUnitChange)
+
+    return () => {
+      window.removeEventListener("networkUnitChanged", handleUnitChange)
+      window.removeEventListener("storage", handleUnitChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (networkUnitProp) {
+      setNetworkUnit(networkUnitProp)
+    }
+  }, [networkUnitProp])
 
   useEffect(() => {
     setIsInitialLoad(true)
     fetchMetrics()
-  }, [timeframe, interfaceName])
+  }, [timeframe, interfaceName, networkUnit])
 
   useEffect(() => {
     if (refreshInterval > 0) {
@@ -67,7 +97,7 @@ export function NetworkTrafficChart({
 
       return () => clearInterval(interval)
     }
-  }, [timeframe, interfaceName, refreshInterval])
+  }, [timeframe, interfaceName, refreshInterval, networkUnit]) // Added networkUnit to dependencies
 
   const fetchMetrics = async () => {
     if (isInitialLoad) {
@@ -137,6 +167,15 @@ export function NetworkTrafficChart({
 
         const netInBytes = (item.netin || 0) * intervalSeconds
         const netOutBytes = (item.netout || 0) * intervalSeconds
+
+        if (networkUnit === "Bits") {
+          return {
+            time: timeLabel,
+            timestamp: item.time,
+            netIn: Number(((netInBytes * 8) / 1024 / 1024 / 1024).toFixed(4)),
+            netOut: Number(((netOutBytes * 8) / 1024 / 1024 / 1024).toFixed(4)),
+          }
+        }
 
         return {
           time: timeLabel,
@@ -240,10 +279,15 @@ export function NetworkTrafficChart({
           stroke="currentColor"
           className="text-foreground"
           tick={{ fill: "currentColor", fontSize: 12 }}
-          label={{ value: "GB", angle: -90, position: "insideLeft", fill: "currentColor" }}
+          label={{
+            value: networkUnit === "Bits" ? "Gb" : "GB", // Dynamic label based on unit
+            angle: -90,
+            position: "insideLeft",
+            fill: "currentColor",
+          }}
           domain={[0, "auto"]}
         />
-        <Tooltip content={<CustomNetworkTooltip />} />
+        <Tooltip content={<CustomNetworkTooltip networkUnit={networkUnit} />} /> // Pass networkUnit to tooltip
         <Legend verticalAlign="top" height={36} content={renderLegend} />
         <Area
           type="monotone"

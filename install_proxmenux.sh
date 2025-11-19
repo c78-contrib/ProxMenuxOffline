@@ -440,7 +440,7 @@ update_config() {
     local status="$2"
     local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     
-    local tracked_components=("dialog" "curl" "jq" "python3" "python3-venv" "python3-pip" "virtual_environment" "pip" "googletrans" "proxmenux_monitor")
+    local tracked_components=("dialog" "curl" "jq" "git" "python3" "python3-venv" "python3-pip" "virtual_environment" "pip" "googletrans" "proxmenux_monitor")
     
     if [[ " ${tracked_components[@]} " =~ " ${component} " ]]; then
         mkdir -p "$(dirname "$CONFIG_FILE")"
@@ -727,7 +727,17 @@ install_normal_version() {
         update_config "jq" "already_installed"
     fi
     
+
+
+
+
     BASIC_DEPS=("dialog" "curl" "git")
+
+    if [ -z "${APT_UPDATED:-}" ]; then
+        apt-get update -y > /dev/null 2>&1 || true
+        APT_UPDATED=1
+    fi
+
     for pkg in "${BASIC_DEPS[@]}"; do
         if ! dpkg -l | grep -qw "$pkg"; then
             if apt-get install -y "$pkg" > /dev/null 2>&1; then
@@ -741,8 +751,41 @@ install_normal_version() {
             update_config "$pkg" "already_installed"
         fi
     done
-    
+
+
+    if ! command -v git > /dev/null 2>&1; then
+        msg_info "Installing git (required to clone the ProxMenux repository)."
+
+
+        if [ -z "${APT_UPDATED:-}" ]; then
+            apt-get update -y > /dev/null 2>&1 || true
+            APT_UPDATED=1
+        fi
+
+        if ! apt-get install -y git > /dev/null 2>&1; then
+            msg_error "Failed to install git. Please run 'apt-get install git' manually and rerun the installer."
+            update_config "git" "failed"
+            return 1
+        fi
+
+
+        if ! command -v git > /dev/null 2>&1; then
+            msg_error "Git is still not available after installation. Aborting to avoid a broken setup."
+            update_config "git" "failed"
+            return 1
+        fi
+
+        update_config "git" "installed"
+    else
+        update_config "git" "already_installed"
+    fi
+
     msg_ok "jq, dialog, curl and git installed successfully."
+
+
+
+
+
 
     ((current_step++))
 
@@ -1037,6 +1080,8 @@ install_proxmenux() {
     type_text "To run ProxMenux, simply execute this command in the console or terminal:"
     echo -e "${YWB}    menu${CL}"
     echo
+    # -------
+    exit 0
 }
 
 if [ "$(id -u)" -ne 0 ]; then

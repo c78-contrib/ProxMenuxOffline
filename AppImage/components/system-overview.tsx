@@ -4,11 +4,12 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Progress } from "./ui/progress"
 import { Badge } from "./ui/badge"
-import { Cpu, MemoryStick, Thermometer, Server, Zap, AlertCircle, HardDrive, Network } from "lucide-react"
+import { Cpu, MemoryStick, Thermometer, Server, Zap, AlertCircle, HardDrive, Network } from 'lucide-react'
 import { NodeMetricsCharts } from "./node-metrics-charts"
 import { NetworkTrafficChart } from "./network-traffic-chart"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
 import { fetchApi } from "../lib/api-config"
+import { formatNetworkTraffic, getNetworkUnit } from "../lib/format-network"
 
 interface SystemData {
   cpu_usage: number
@@ -146,6 +147,12 @@ const fetchProxmoxStorageData = async (): Promise<ProxmoxStorageData | null> => 
   }
 }
 
+const getUnitsSettings = (): "Bytes" | "Bits" => {
+  if (typeof window === "undefined") return "Bytes"
+  const raw = window.localStorage.getItem("proxmenux-network-unit")
+  return raw && raw.toLowerCase() === "bits" ? "Bits" : "Bytes"
+}
+
 export function SystemOverview() {
   const [systemData, setSystemData] = useState<SystemData | null>(null)
   const [vmData, setVmData] = useState<VMData[]>([])
@@ -161,6 +168,7 @@ export function SystemOverview() {
   const [error, setError] = useState<string | null>(null)
   const [networkTimeframe, setNetworkTimeframe] = useState("day")
   const [networkTotals, setNetworkTotals] = useState<{ received: number; sent: number }>({ received: 0, sent: 0 })
+  const [networkUnit, setNetworkUnit] = useState<"Bytes" | "Bits">("Bytes") // Added networkUnit state
 
   useEffect(() => {
     const fetchAllData = async () => {
@@ -215,11 +223,20 @@ export function SystemOverview() {
       if (data) setNetworkData(data)
     }, 59000)
 
+    setNetworkUnit(getNetworkUnit()) // Load initial setting
+
+    const handleUnitChange = (e: CustomEvent) => {
+      setNetworkUnit(e.detail === "Bits" ? "Bits" : "Bytes")
+    }
+
+    window.addEventListener("networkUnitChanged" as any, handleUnitChange)
+
     return () => {
       clearInterval(systemInterval)
       clearInterval(vmInterval)
       clearInterval(storageInterval)
       clearInterval(networkInterval)
+      window.removeEventListener("networkUnitChanged" as any, handleUnitChange)
     }
   }, [])
 
@@ -296,16 +313,6 @@ export function SystemOverview() {
 
   const formatBytes = (bytes: number) => {
     return (bytes / 1024 ** 3).toFixed(2)
-  }
-
-  const formatStorage = (sizeInGB: number): string => {
-    if (sizeInGB < 1) {
-      return `${(sizeInGB * 1024).toFixed(1)} MB`
-    } else if (sizeInGB > 999) {
-      return `${(sizeInGB / 1024).toFixed(2)} TB`
-    } else {
-      return `${sizeInGB.toFixed(2)} GB`
-    }
   }
 
   const tempStatus = getTemperatureStatus(systemData.temperature)
@@ -412,26 +419,6 @@ export function SystemOverview() {
         </Card>
 
         <Card className="bg-card border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Temperature</CardTitle>
-            <Thermometer className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-xl lg:text-2xl font-bold text-foreground">
-              {systemData.temperature === 0 ? "N/A" : `${systemData.temperature}°C`}
-            </div>
-            <div className="flex items-center mt-2">
-              <Badge variant="outline" className={tempStatus.color}>
-                {tempStatus.status}
-              </Badge>
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              {systemData.temperature === 0 ? "No sensor available" : "Live temperature reading"}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-foreground flex items-center">
               <Server className="h-5 w-5 mr-2" />
@@ -465,6 +452,26 @@ export function SystemOverview() {
             )}
           </CardContent>
         </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Temperature</CardTitle>
+            <Thermometer className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-xl lg:text-2xl font-bold text-foreground">
+              {systemData.temperature === 0 ? "N/A" : `${systemData.temperature}°C`}
+            </div>
+            <div className="flex items-center mt-2">
+              <Badge variant="outline" className={tempStatus.color}>
+                {tempStatus.status}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              {systemData.temperature === 0 ? "No sensor available" : "Live temperature reading"}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <NodeMetricsCharts />
@@ -496,7 +503,7 @@ export function SystemOverview() {
                     <div className="space-y-2 pb-4 border-b-2 border-border">
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-medium text-foreground">Total Node Capacity:</span>
-                        <span className="text-lg font-bold text-foreground">{formatStorage(totalCapacity)}</span>
+                        <span className="text-lg font-bold text-foreground">{formatNetworkTraffic(totalCapacity, "Bytes")}</span>
                       </div>
                       <Progress
                         value={totalPercent}
@@ -505,10 +512,10 @@ export function SystemOverview() {
                       <div className="flex justify-between items-center mt-1">
                         <div className="flex items-center gap-3">
                           <span className="text-xs text-muted-foreground">
-                            Used: <span className="font-semibold text-foreground">{formatStorage(totalUsed)}</span>
+                            Used: <span className="font-semibold text-foreground">{formatNetworkTraffic(totalUsed, "Bytes")}</span>
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            Free: <span className="font-semibold text-green-500">{formatStorage(totalAvailable)}</span>
+                            Free: <span className="font-semibold text-green-500">{formatNetworkTraffic(totalAvailable, "Bytes")}</span>
                           </span>
                         </div>
                         <span className="text-xs font-semibold text-muted-foreground">{totalPercent.toFixed(1)}%</span>
@@ -535,18 +542,18 @@ export function SystemOverview() {
                     <div className="text-xs font-medium text-muted-foreground mb-2">VM/LXC Storage</div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-muted-foreground">Used:</span>
-                      <span className="text-sm font-semibold text-foreground">{formatStorage(vmLxcStorageUsed)}</span>
+                      <span className="text-sm font-semibold text-foreground">{formatNetworkTraffic(vmLxcStorageUsed, "Bytes")}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-muted-foreground">Available:</span>
                       <span className="text-sm font-semibold text-green-500">
-                        {formatStorage(vmLxcStorageAvailable)}
+                        {formatNetworkTraffic(vmLxcStorageAvailable, "Bytes")}
                       </span>
                     </div>
                     <Progress value={vmLxcStoragePercent} className="mt-2 [&>div]:bg-blue-500" />
                     <div className="flex justify-between items-center mt-1">
                       <span className="text-xs text-muted-foreground">
-                        {formatStorage(vmLxcStorageUsed)} / {formatStorage(vmLxcStorageTotal)}
+                        {formatNetworkTraffic(vmLxcStorageUsed, "Bytes")} / {formatNetworkTraffic(vmLxcStorageTotal, "Bytes")}
                       </span>
                       <span className="text-xs text-muted-foreground">{vmLxcStoragePercent.toFixed(1)}%</span>
                     </div>
@@ -568,18 +575,18 @@ export function SystemOverview() {
                     <div className="text-xs font-medium text-muted-foreground mb-2">Local Storage (System)</div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-muted-foreground">Used:</span>
-                      <span className="text-sm font-semibold text-foreground">{formatStorage(localStorage.used)}</span>
+                      <span className="text-sm font-semibold text-foreground">{formatNetworkTraffic(localStorage.used, "Bytes")}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-muted-foreground">Available:</span>
                       <span className="text-sm font-semibold text-green-500">
-                        {formatStorage(localStorage.available)}
+                        {formatNetworkTraffic(localStorage.available, "Bytes")}
                       </span>
                     </div>
                     <Progress value={localStorage.percent} className="mt-2 [&>div]:bg-purple-500" />
                     <div className="flex justify-between items-center mt-1">
                       <span className="text-xs text-muted-foreground">
-                        {formatStorage(localStorage.used)} / {formatStorage(localStorage.total)}
+                        {formatNetworkTraffic(localStorage.used, "Bytes")} / {formatNetworkTraffic(localStorage.total, "Bytes")}
                       </span>
                       <span className="text-xs text-muted-foreground">{localStorage.percent.toFixed(1)}%</span>
                     </div>
@@ -667,21 +674,25 @@ export function SystemOverview() {
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Received:</span>
                     <span className="text-lg font-semibold text-green-500 flex items-center gap-1">
-                      ↓ {formatStorage(networkTotals.received)}
+                      ↓ {networkUnit === "Bytes"
+                        ? `${networkTotals.received.toFixed(2)} GB`
+                        : formatNetworkTraffic(networkTotals.received * 1024 * 1024 * 1024, 'Bits')}
                       <span className="text-xs text-muted-foreground">({getTimeframeLabel(networkTimeframe)})</span>
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Sent:</span>
                     <span className="text-lg font-semibold text-blue-500 flex items-center gap-1">
-                      ↑ {formatStorage(networkTotals.sent)}
+                      ↑ {networkUnit === "Bytes" 
+                        ? `${networkTotals.sent.toFixed(2)} GB` 
+                        : formatNetworkTraffic(networkTotals.sent * 1024 * 1024 * 1024, 'Bits')}
                       <span className="text-xs text-muted-foreground">({getTimeframeLabel(networkTimeframe)})</span>
                     </span>
                   </div>
                 </div>
 
                 <div className="pt-3 border-t border-border">
-                  <NetworkTrafficChart timeframe={networkTimeframe} onTotalsCalculated={setNetworkTotals} />
+                  <NetworkTrafficChart timeframe={networkTimeframe} onTotalsCalculated={setNetworkTotals} networkUnit={networkUnit} />
                 </div>
               </div>
             ) : (
